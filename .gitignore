@@ -1,0 +1,13 @@
+# Typescript
+
+node_modules/
+*~
+.cache/
+out/
+Thumbs.db
+coverage/
+npm-debug.log*
+build/
+*.log
+.env
+*.js.map
