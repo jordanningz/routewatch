@@ -1,75 +1,82 @@
-import { Request, Response, NextFunction } from 'express';
+import { AlertHandler } from './alerting';
 
 export interface RouteWatchOptions {
-  slowThresholdMs?: number;
+  /** Duration in ms above which a route is considered slow. Default: 500 */
+  slowThreshold?: number;
+  /** List of alert handler functions to invoke on slow routes */
   alertHandlers?: AlertHandler[];
+  /** Override the global sample rate for this middleware instance (0–1) */
   sampleRate?: number;
+  /** Enable per-route rate limiting. Default: false */
+  enableRateLimit?: boolean;
+  /** Enable circuit breaker protection. Default: false */
   enableCircuitBreaker?: boolean;
 }
 
 export interface RouteMetric {
   route: string;
-  method: string;
-  statusCode: number;
-  durationMs: number;
-  timestamp: number;
+  duration: number;
+  timestamp: Date;
+  correlationId?: string;
 }
 
 export interface RouteStats {
   route: string;
-  requestCount: number;
-  avgDurationMs: number;
-  maxDurationMs: number;
-  minDurationMs: number;
-  errorCount: number;
+  count: number;
+  totalDuration: number;
+  minDuration: number;
+  maxDuration: number;
+  avgDuration: number;
+  durations: number[];
 }
 
 export interface AlertPayload {
   route: string;
-  method: string;
-  durationMs: number;
+  duration: number;
   threshold: number;
-  timestamp: number;
+  timestamp: Date;
+  correlationId?: string;
 }
 
-export type AlertHandler = (payload: AlertPayload) => void | Promise<void>;
-
-export interface SamplingConfig {
-  defaultRate: number;
-  routeOverrides?: Record<string, number>;
+export interface DashboardSnapshot {
+  generatedAt: Date;
+  totalRoutes: number;
+  totalRequests: number;
+  slowRoutes: SlowRouteSummary[];
+  topRoutes: RouteStats[];
 }
 
-export interface RateLimitConfig {
-  windowMs: number;
-  maxRequests: number;
-}
-
-export interface WindowStats {
+export interface SlowRouteSummary {
   route: string;
-  requestCount: number;
-  windowStart: number;
-  windowEnd: number;
-  isLimited: boolean;
+  avgDuration: number;
+  maxDuration: number;
+  count: number;
 }
 
-export type CircuitBreakerState = 'closed' | 'open' | 'half-open';
-
-export interface CircuitBreakerConfig {
-  failureThreshold: number;
-  recoveryTimeMs: number;
-  slowRequestThreshold: number;
+export interface MetricsFilter {
+  route?: string;
+  minCount?: number;
+  minAvgDuration?: number;
 }
 
-export interface RouteCircuitState {
-  state: CircuitBreakerState;
-  failureCount: number;
-  slowCount: number;
-  lastFailureTime: number | null;
-  openedAt: number | null;
+export interface PercentileStats {
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+  p99: number;
 }
 
-export type MiddlewareFunction = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => void;
+export interface AnomalyDetectionConfig {
+  zScoreThreshold?: number;
+  minSamples?: number;
+}
+
+export interface AnomalyResult {
+  route: string;
+  isAnomaly: boolean;
+  zScore: number;
+  latestDuration: number;
+  mean: number;
+  stdDev: number;
+}

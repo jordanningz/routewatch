@@ -1,62 +1,71 @@
-/**
- * Core routewatch middleware.
- */
-
 import { Request, Response, NextFunction } from 'express';
 import { RouteWatchOptions } from './types';
 import { recordMetric } from './metrics';
-import { isSlowRoute, composeAlertHandlers, createAlert } from './alerting';
-import { shouldSample, configureSampling } from './sampling';
-
-const DEFAULT_SLOW_THRESHOLD = 500;
+import { isSlowRoute, composeAlertHandlers } from './alerting';
+import { shouldSample } from './sampling';
+import { isRateLimited, recordRequest } from './rateLimit';
+import { getCircuitState, recordFailure, recordSlowRequest, CircuitState } from './circuitBreaker';
+import { touchRoute } from './retentionPolicy';
+import { getCorrelationId } from './correlationId';
 
 export function routewatch(options: RouteWatchOptions = {}) {
-  const threshold = options.slowThreshold ?? DEFAULT_SLOW_THRESHOLD;
-  const alertHandler = options.alertHandlers
-    ? composeAlertHandlers(options.alertHandlers)
-    : null;
+  const {
+    slowThreshold = 500,
+    alertHandlers = [],
+    sampleRate,
+    enableRateLimit = false,
+    enableCircuitBreaker = false,
+  } = options;
 
-  if (options.sampling) {
-    configureSampling(options.sampling);
-  }
+  const alert = composeAlertHandlers(alertHandlers);
 
-  return function routewatchMiddleware(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): void {
-    const start = Date.now();
-    const route = req.path;
-
-    if (!shouldSample(route)) {
+  return function (req: Request, res: Response, next: NextFunction): void {
+    if (!shouldSample(sampleRate)) {
       return next();
     }
 
-    res.on('finish', () => {
-      const durationMs = Date.now() - start;
-      const metric = {
-        route,
-        method: req.method,
-        statusCode: res.statusCode,
-        durationMs,
-        timestamp: start,
-      };
+    const route = req.path;
 
-      try {
-        recordMetric(metric);
-      } catch (err) {
-        // Metric recording should never crash the application
-        console.error('[routewatch] Failed to record metric:', err);
+    if (enableRateLimit && isRateLimited(route)) {
+      res.status(429).json({ error: 'Too Many Requests' });
+      return;
+    }
+
+    const circuitState = enableCircuitBreaker ? getCircuitState(route) : null;
+    if (circuitState === CircuitState.Open) {
+      res.status(503).json({ error: 'Service Unavailable' });
+      return;
+    }
+
+    const start = Date.now();
+
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      const correlationId = getCorrelationId(req);
+
+      recordMetric(route, duration);
+      touchRoute(route);
+
+      if (enableRateLimit) {
+        recordRequest(route);
       }
 
-      if (alertHandler && isSlowRoute(durationMs, threshold)) {
-        const alert = createAlert(route, req.method, durationMs, threshold);
-        try {
-          alertHandler(alert);
-        } catch (err) {
-          // Alert handler errors should not propagate to the request lifecycle
-          console.error('[routewatch] Alert handler threw an error:', err);
+      if (enableCircuitBreaker) {
+        if (res.statusCode >= 500) {
+          recordFailure(route);
+        } else if (isSlowRoute(duration, slowThreshold)) {
+          recordSlowRequest(route);
         }
+      }
+
+      if (isSlowRoute(duration, slowThreshold)) {
+        alert({
+          route,
+          duration,
+          threshold: slowThreshold,
+          timestamp: new Date(),
+          correlationId,
+        });
       }
     });
 
