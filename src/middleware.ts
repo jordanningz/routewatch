@@ -42,11 +42,21 @@ export function routewatch(options: RouteWatchOptions = {}) {
         timestamp: start,
       };
 
-      recordMetric(metric);
+      try {
+        recordMetric(metric);
+      } catch (err) {
+        // Metric recording should never crash the application
+        console.error('[routewatch] Failed to record metric:', err);
+      }
 
       if (alertHandler && isSlowRoute(durationMs, threshold)) {
         const alert = createAlert(route, req.method, durationMs, threshold);
-        alertHandler(alert);
+        try {
+          alertHandler(alert);
+        } catch (err) {
+          // Alert handler errors should not propagate to the request lifecycle
+          console.error('[routewatch] Alert handler threw an error:', err);
+        }
       }
     });
 
