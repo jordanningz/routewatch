@@ -1,76 +1,68 @@
-import express, { Express } from 'express';
+import express, { Application } from 'express';
 import request from 'supertest';
 import { routewatch } from './middleware';
-import { SlowRouteAlert } from './types';
+import { clearMetrics, getRouteStats } from './metrics';
+import { resetSamplingConfig } from './sampling';
+import { AlertPayload } from './types';
 
-function buildApp(overrides: Parameters<typeof routewatch>[0] = {}): Express {
+export function buildApp(options = {}): Application {
   const app = express();
-  app.use(routewatch(overrides));
-
+  app.use(routewatch(options));
   app.get('/fast', (_req, res) => res.json({ ok: true }));
-
   app.get('/slow', (_req, res) => {
-    setTimeout(() => res.json({ ok: true }), 80);
+    setTimeout(() => res.json({ ok: true }), 10);
   });
-
   return app;
 }
 
+beforeEach(() => {
+  clearMetrics();
+  resetSamplingConfig();
+});
+
 describe('routewatch middleware', () => {
-  it('does not trigger onAlert for fast routes', async () => {
-    const onAlert = jest.fn();
-    const app = buildApp({ threshold: 500, onAlert });
-
+  it('records a metric after a request completes', async () => {
+    const app = buildApp();
     await request(app).get('/fast').expect(200);
-
-    await new Promise((r) => setTimeout(r, 20));
-    expect(onAlert).not.toHaveBeenCalled();
+    const stats = getRouteStats('/fast');
+    expect(stats).not.toBeNull();
+    expect(stats!.count).toBe(1);
   });
 
-  it('triggers onAlert when route exceeds threshold', async () => {
-    const alerts: SlowRouteAlert[] = [];
+  it('calls alert handler when route exceeds threshold', async () => {
+    const alerts: AlertPayload[] = [];
     const app = buildApp({
-      threshold: 50,
-      onAlert: (alert) => alerts.push(alert),
+      slowThreshold: 1,
+      alertHandlers: [(p: AlertPayload) => alerts.push(p)],
     });
-
     await request(app).get('/slow').expect(200);
-
-    await new Promise((r) => setTimeout(r, 20));
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].route).toBe('GET /slow');
-    expect(alerts[0].durationMs).toBeGreaterThan(50);
-    expect(alerts[0].threshold).toBe(50);
-    expect(alerts[0].statusCode).toBe(200);
+    expect(alerts.length).toBeGreaterThan(0);
+    expect(alerts[0].route).toBe('/slow');
   });
 
-  it('uses a custom logger', async () => {
-    const warnSpy = jest.fn();
+  it('does not call alert handler for fast routes', async () => {
+    const alerts: AlertPayload[] = [];
     const app = buildApp({
-      threshold: 50,
-      logger: { log: jest.fn(), warn: warnSpy },
+      slowThreshold: 10000,
+      alertHandlers: [(p: AlertPayload) => alerts.push(p)],
     });
-
-    await request(app).get('/slow').expect(200);
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('SLOW ROUTE detected')
-    );
-  });
-
-  it('logs all requests when logAll is true', async () => {
-    const logSpy = jest.fn();
-    const app = buildApp({
-      logAll: true,
-      logger: { log: logSpy, warn: jest.fn() },
-    });
-
     await request(app).get('/fast').expect(200);
-    await new Promise((r) => setTimeout(r, 20));
+    expect(alerts.length).toBe(0);
+  });
 
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('GET /fast')
-    );
+  it('respects sampling rate of 0 — records no metrics', async () => {
+    const app = buildApp({ sampling: { rate: 0 } });
+    await request(app).get('/fast').expect(200);
+    const stats = getRouteStats('/fast');
+    expect(stats).toBeNull();
+  });
+
+  it('respects sampling rate of 1 — always records metrics', async () => {
+    const app = buildApp({ sampling: { rate: 1 } });
+    for (let i = 0; i < 5; i++) {
+      await request(app).get('/fast').expect(200);
+    }
+    const stats = getRouteStats('/fast');
+    expect(stats!.count).toBe(5);
   });
 });

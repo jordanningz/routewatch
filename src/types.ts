@@ -1,55 +1,57 @@
+/**
+ * Core types for routewatch middleware.
+ */
+
 import { Request, Response, NextFunction } from 'express';
 
-/**
- * Configuration options for the routewatch middleware.
- */
 export interface RouteWatchOptions {
-  /**
-   * Duration in milliseconds above which a route is considered slow.
-   * @default 500
-   */
-  threshold?: number;
-
-  /**
-   * Custom alert handler invoked when a slow route is detected.
-   * Defaults to logging to stderr.
-   */
-  onAlert?: AlertHandler;
-
-  /**
-   * Whether to skip logging for routes that match the given patterns.
-   */
-  ignore?: (string | RegExp)[];
-
-  /**
-   * Whether to attach timing headers (X-Response-Time) to responses.
-   * @default false
-   */
-  responseTimeHeader?: boolean;
+  /** Threshold in ms above which a route is considered slow. Default: 500 */
+  slowThreshold?: number;
+  /** Alert handlers to invoke when a slow route is detected */
+  alertHandlers?: AlertHandler[];
+  /** Sampling configuration */
+  sampling?: Partial<SamplingConfig>;
 }
 
-/**
- * Represents a single slow-route alert event.
- */
-export interface RouteWatchAlert {
-  /** HTTP method (e.g. GET, POST) */
+export interface RouteMetric {
+  route: string;
   method: string;
-  /** The matched route path */
-  path: string;
-  /** Measured response duration in milliseconds */
-  duration: number;
-  /** The threshold that was exceeded */
-  threshold: number;
-  /** Unix timestamp (ms) when the alert was generated */
+  statusCode: number;
+  durationMs: number;
   timestamp: number;
 }
 
-/**
- * A function that receives a slow-route alert and handles it.
- */
-export type AlertHandler = (alert: RouteWatchAlert) => void;
+export interface RouteStats {
+  route: string;
+  count: number;
+  avgDurationMs: number;
+  maxDurationMs: number;
+  minDurationMs: number;
+  p95DurationMs: number;
+  slowCount: number;
+}
 
-/**
- * Express-compatible middleware signature.
- */
-export type Middleware = (req: Request, res: Response, next: NextFunction) => void;
+export interface AlertPayload {
+  route: string;
+  method: string;
+  durationMs: number;
+  threshold: number;
+  timestamp: number;
+}
+
+export type AlertHandler = (payload: AlertPayload) => void | Promise<void>;
+
+export interface MetricsReporterOptions {
+  /** Secret token required in Authorization header */
+  authToken?: string;
+  /** Path to mount the metrics router. Default: '/routewatch' */
+  mountPath?: string;
+}
+
+/** Sampling configuration */
+export interface SamplingConfig {
+  /** Global sample rate between 0 and 1. Default: 1.0 (100%) */
+  rate: number;
+  /** Per-route overrides, keyed by route path */
+  perRoute: Record<string, number>;
+}
