@@ -81,3 +81,15 @@ export function resetCircuit(route: string): void {
 export function resetAllCircuits(): void {
   circuitStates.clear();
 }
+
+/**
+ * Returns a snapshot of all tracked circuit states, keyed by route.
+ * Useful for monitoring dashboards and health-check endpoints.
+ */
+export function getAllCircuitStates(): Record<string, RouteCircuitState> {
+  const snapshot: Record<string, RouteCircuitState> = {};
+  for (const [route, state] of circuitStates.entries()) {
+    snapshot[route] = { ...state };
+  }
+  return snapshot;
+}
