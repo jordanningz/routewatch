@@ -62,6 +62,16 @@ export function getHourlyBuckets(route: string): number[] | undefined {
   return hourlyBuckets.get(route);
 }
 
+/**
+ * Returns the top N routes by total request count, sorted descending.
+ * Useful for identifying the most heavily trafficked routes at a glance.
+ */
+export function getTopRoutesByVolume(limit: number): TrafficProfile[] {
+  return getAllTrafficProfiles()
+    .sort((a, b) => b.totalRequests - a.totalRequests)
+    .slice(0, limit);
+}
+
 export function resetTrafficProfiles(): void {
   profiles.clear();
   hourlyBuckets.clear();
